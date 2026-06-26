@@ -105,7 +105,7 @@ main { padding: 0 clamp(1rem, 4vw, 3rem) 3rem; }
 .dropzone span { font-size: 1.2rem; font-weight: 800; color: var(--brand-dark); }
 .dropzone small { color: var(--muted); }
 .dropzone input { display: none; }
-.actions, .button-row { display: flex; gap: .8rem; flex-wrap: wrap; margin-top: 1rem; }
+.actions { display: flex; gap: .8rem; flex-wrap: wrap; margin-top: 1rem; }
 .tips { margin-top: 1rem; padding: 1.4rem; }
 .tips li { margin: .45rem 0; color: var(--muted); }
 

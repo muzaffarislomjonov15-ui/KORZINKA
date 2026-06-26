@@ -1,10 +1,5 @@
 const VAT_RATE = 0.12;
 const SAMPLE_FILE = 'Заказы с товарами 25-27.05.2026г.xls';
-const TEMPLATE_FILES = [
-  'ШАБЛОН СЧФ для КОРЗИНКИ-365.xlsx',
-  'ШАБЛОН СЧФ для КОРЗИНКИ-365.xls',
-  'ШАБЛОН СЧФ для КОРЗИНКИ-365.xlsm',
-];
 
 const state = {
   fileName: '',
@@ -25,8 +20,6 @@ const els = {
   loadSampleBtn: document.querySelector('#loadSampleBtn'),
   clearBtn: document.querySelector('#clearBtn'),
   exportCsvBtn: document.querySelector('#exportCsvBtn'),
-  exportExcelBtn: document.querySelector('#exportExcelBtn'),
-  exportInvoiceExcelBtn: document.querySelector('#exportInvoiceExcelBtn'),
   printBtn: document.querySelector('#printBtn'),
   buildInvoiceBtn: document.querySelector('#buildInvoiceBtn'),
   invoiceDate: document.querySelector('#invoiceDate'),
@@ -94,8 +87,6 @@ els.clearBtn.addEventListener('click', () => {
 });
 
 els.exportCsvBtn.addEventListener('click', exportCsv);
-els.exportExcelBtn.addEventListener('click', () => exportExcel());
-els.exportInvoiceExcelBtn.addEventListener('click', () => exportExcel());
 els.printBtn.addEventListener('click', () => {
   activateTab('invoice');
   window.print();
@@ -161,9 +152,6 @@ function processWorkbook(buffer, fileName) {
 }
 
 function parseRows(rows) {
-  const flatResult = parseFlatTableRows(rows);
-  if (flatResult.stores.length) return flatResult;
-
   const warnings = [];
   const storeMap = new Map();
   let currentStore = null;
@@ -226,7 +214,6 @@ function parseRows(rows) {
   const stores = Array.from(storeMap.values()).map((store) => ({
     ...store,
     products: Array.from(store.products.values()).sort((a, b) => a.name.localeCompare(b.name, 'ru')),
-    orderNumbers: Array.from(store.orderNumbers || []),
   })).sort((a, b) => a.name.localeCompare(b.name, 'ru'));
 
   if (!stores.length) warnings.push('Magazin va mahsulot qatorlari topilmadi. Sarlavhalar nomini tekshiring.');
@@ -235,116 +222,6 @@ function parseRows(rows) {
   });
 
   return { stores, warnings };
-}
-
-
-function parseFlatTableRows(rows) {
-  const headerInfo = findFlatHeader(rows);
-  if (!headerInfo) return { stores: [], warnings: [] };
-
-  const { headerIndex, columns } = headerInfo;
-  const productCol = findColumn(columns, ({ header }) => header === 'товар' || header.includes('товар'));
-  const quantityCol = findColumn(columns, ({ header }) => header.includes('кол-во') || header.includes('количество'));
-  const priceCol = findColumn(columns, ({ header }) => header.includes('цена за единицу') || header === 'цена');
-  const netCol = findColumn(columns, ({ header, full }) => header === 'стоимость' && !full.includes('ндс'));
-  const vatRateCol = findColumn(columns, ({ header, parent }) => header === 'ставка' && parent.includes('ндс'));
-  const vatAmountCol = findColumn(columns, ({ header, parent }) => header === 'сумма' && parent.includes('ндс'));
-  const grossCol = findColumn(columns, ({ full }) => full.includes('стоимость с учетом ндс') || full.includes('стоимость с учётом ндс'));
-  const totalCol = findColumn(columns, ({ full }) => full.includes('общая сумма'));
-  const orderCol = findColumn(columns, ({ header, parent }) => header === 'номер' && parent.includes('заказ'));
-  const storeNameCol = findColumn(columns, ({ header, parent }) => header.includes('название') && parent.includes('магазин'));
-
-  if (storeNameCol === -1 || productCol === -1 || quantityCol === -1) return { stores: [], warnings: [] };
-
-  const storeMap = new Map();
-  const orderStorePairs = new Set();
-
-  rows.slice(headerIndex + 1).forEach((row, offset) => {
-    const sourceRow = headerIndex + offset + 2;
-    const storeName = cleanName(row[storeNameCol]);
-    const productName = cleanName(row[productCol]);
-    if (!storeName || !productName || isIgnoredProductName(productName)) return;
-
-    const quantity = parseNumber(row[quantityCol]);
-    const price = parseNumber(row[priceCol]);
-    const net = parseNumber(row[netCol]) || quantity * price;
-    const vatRate = parseNumber(row[vatRateCol]) || 12;
-    const vat = parseNumber(row[vatAmountCol]) || net * (vatRate / 100 || VAT_RATE);
-    const gross = parseNumber(row[grossCol]) || net + vat;
-    if (!quantity && !net && !gross) return;
-
-    const orderNumber = cleanName(row[orderCol]) || findTenDigitOrderNumber(row);
-    const declaredTotal = parseNumber(row[totalCol]);
-    const store = getStore(storeMap, storeName, 0, false);
-    const pairKey = `${normalizeText(storeName)}|${orderNumber || sourceRow}`;
-    if (!orderStorePairs.has(pairKey)) {
-      orderStorePairs.add(pairKey);
-      store.parts += 1;
-      store.declaredTotal += declaredTotal || 0;
-    }
-
-    addOrderNumber(store, orderNumber);
-
-    addProduct(store, {
-      name: productName,
-      quantity,
-      price: price || (quantity ? net / quantity : 0),
-      net,
-      vat,
-      gross,
-      sourceRow,
-    }, els.groupByPrice.checked);
-  });
-
-  const stores = Array.from(storeMap.values()).map((store) => ({
-    ...store,
-    products: Array.from(store.products.values()).sort((a, b) => a.name.localeCompare(b.name, 'ru')),
-    orderNumbers: Array.from(store.orderNumbers || []),
-  })).filter((store) => store.products.length).sort((a, b) => a.name.localeCompare(b.name, 'ru'));
-
-  return { stores, warnings: [] };
-}
-
-function findFlatHeader(rows) {
-  for (let index = 0; index < Math.min(rows.length, 20); index += 1) {
-    const headerRow = rows[index] || [];
-    const normalized = headerRow.map(normalizeText);
-    const hasProduct = normalized.some((cell) => cell === 'товар' || cell.includes('товар'));
-    const hasQuantity = normalized.some((cell) => cell.includes('кол-во') || cell.includes('количество'));
-    const hasPrice = normalized.some((cell) => cell.includes('цена за единицу'));
-    if (!hasProduct || !hasQuantity || !hasPrice) continue;
-
-    const parentRow = rows[Math.max(0, index - 1)] || [];
-    const parents = fillMergedParents(parentRow, headerRow.length);
-    const columns = headerRow.map((cell, columnIndex) => {
-      const header = normalizeText(cell);
-      const parent = normalizeText(parents[columnIndex]);
-      return {
-        index: columnIndex,
-        header,
-        parent,
-        full: `${parent} ${header}`.trim(),
-      };
-    });
-    return { headerIndex: index, columns };
-  }
-  return null;
-}
-
-function fillMergedParents(parentRow, length) {
-  const parents = [];
-  let current = '';
-  for (let index = 0; index < length; index += 1) {
-    const value = cleanName(parentRow[index]);
-    if (value) current = value;
-    parents[index] = current;
-  }
-  return parents;
-}
-
-function findColumn(columns, predicate) {
-  const column = columns.find(predicate);
-  return column ? column.index : -1;
 }
 
 function findShopHeader(normalized) {
@@ -390,26 +267,15 @@ function isIgnoredProductName(name) {
   return ['товар', 'итого', 'всего'].includes(value) || value.includes('общая сумма');
 }
 
-function getStore(storeMap, name, declaredTotal, incrementParts = true) {
+function getStore(storeMap, name, declaredTotal) {
   const key = normalizeText(name);
   if (!storeMap.has(key)) {
-    storeMap.set(key, { name, declaredTotal: 0, products: new Map(), parts: 0, orderNumbers: new Set() });
+    storeMap.set(key, { name, declaredTotal: 0, products: new Map(), parts: 0 });
   }
   const store = storeMap.get(key);
-  if (incrementParts) store.parts += 1;
+  store.parts += 1;
   store.declaredTotal += declaredTotal || 0;
   return store;
-}
-
-function addOrderNumber(store, orderNumber) {
-  if (!orderNumber) return;
-  if (!store.orderNumbers) store.orderNumbers = new Set();
-  store.orderNumbers.add(String(orderNumber));
-}
-
-function findTenDigitOrderNumber(row) {
-  const match = row.map(cleanName).find((value) => /^\d{10}$/.test(value));
-  return match || '';
 }
 
 function addProduct(store, product, groupByPrice) {
@@ -520,10 +386,9 @@ function rebuildStoresForCurrentGrouping() {
   const storeMap = new Map();
   state.stores.forEach((store) => {
     const target = getStore(storeMap, store.name, store.declaredTotal);
-    (store.orderNumbers || []).forEach((orderNumber) => addOrderNumber(target, orderNumber));
     store.products.forEach((product) => addProduct(target, product, els.groupByPrice.checked));
   });
-  return Array.from(storeMap.values()).map((store) => ({ ...store, products: Array.from(store.products.values()), orderNumbers: Array.from(store.orderNumbers || []) }));
+  return Array.from(storeMap.values()).map((store) => ({ ...store, products: Array.from(store.products.values()) }));
 }
 
 function invoiceDocument(store, number) {
@@ -576,206 +441,12 @@ function totalRow(total, showVat) {
 
 function exportCsv() {
   if (!state.stores.length) return;
-  const lines = buildFlatExportRows();
+  const lines = [['Magazin', 'Tovar', 'Kol-vo', 'Narx', 'Qiymat', 'NDS 12%', 'NDS bilan']];
+  state.stores.forEach((store) => {
+    store.products.forEach((item) => lines.push([store.name, item.name, item.quantity, item.price, item.net, item.vat, item.gross]));
+  });
   const csv = lines.map((line) => line.map(csvCell).join(';')).join('\n');
   downloadBlob(csv, `nakladnoy-${Date.now()}.csv`, 'text/csv;charset=utf-8');
-}
-
-async function exportExcel() {
-  if (!state.stores.length || !window.XLSX) return;
-  const stores = rebuildStoresForCurrentGrouping();
-  const templateWorkbook = await loadTemplateWorkbook();
-
-  if (templateWorkbook) {
-    exportTemplateWorkbook(templateWorkbook, stores);
-    return;
-  }
-
-  const workbook = XLSX.utils.book_new();
-  const mode = els.invoiceMode.value;
-
-  if (mode === 'single') {
-    appendStoreSheet(workbook, { name: 'Umumiy nakladnoy', products: stores.flatMap((store) => store.products), orderNumbers: stores.flatMap((store) => store.orderNumbers || []) }, 'Nakladnoy');
-  } else {
-    stores.forEach((store, index) => appendStoreSheet(workbook, store, `${index + 1}-${store.name}`));
-  }
-
-  const summarySheet = XLSX.utils.aoa_to_sheet(buildFlatExportRows());
-  XLSX.utils.book_append_sheet(workbook, summarySheet, 'Tahlil');
-  XLSX.writeFile(workbook, `nakladnoy-${Date.now()}.xlsx`);
-}
-
-async function loadTemplateWorkbook() {
-  for (const templateFile of TEMPLATE_FILES) {
-    const response = await fetch(encodeURI(templateFile)).catch(() => null);
-    if (!response || !response.ok) continue;
-    const buffer = await response.arrayBuffer();
-    return XLSX.read(buffer, { type: 'array', cellDates: true, cellStyles: true });
-  }
-  return null;
-}
-
-function exportTemplateWorkbook(templateWorkbook, stores) {
-  const workbook = XLSX.utils.book_new();
-  const templateSheetName = templateWorkbook.SheetNames[0];
-  const templateSheet = templateWorkbook.Sheets[templateSheetName];
-  const mode = els.invoiceMode.value;
-  const targetStores = mode === 'single'
-    ? [{ name: 'Umumiy nakladnoy', products: stores.flatMap((store) => store.products), orderNumbers: stores.flatMap((store) => store.orderNumbers || []) }]
-    : stores;
-
-  targetStores.forEach((store, index) => {
-    const sheet = cloneSheet(templateSheet);
-    fillTemplateSheet(sheet, store);
-    XLSX.utils.book_append_sheet(workbook, sheet, safeSheetName(`${index + 1}-${store.name}`));
-  });
-
-  XLSX.writeFile(workbook, `nakladnoy-korzinka-365-${Date.now()}.xlsx`);
-}
-
-function cloneSheet(sheet) {
-  return JSON.parse(JSON.stringify(sheet));
-}
-
-function fillTemplateSheet(sheet, store) {
-  const range = XLSX.utils.decode_range(sheet['!ref'] || 'A1:A1');
-  writeNearLabel(sheet, range, ['номер заказ', 'номер заказа', 'номер zakaz'], formatOrderNumbers(store));
-  writeNearLabel(sheet, range, ['магазин', 'доставка', 'получатель', 'покупатель'], store.name);
-
-  const table = findTemplateProductTable(sheet, range);
-  if (!table) return;
-
-  const productNames = collectTemplateProductNames(sheet, table);
-  store.products.forEach((product, index) => {
-    const row = table.startRow + index;
-    const productName = resolveTemplateProductName(product.name, productNames);
-    writeCell(sheet, row, table.productCol, productName);
-    if (table.quantityCol !== -1) writeCell(sheet, row, table.quantityCol, roundMoney(product.quantity));
-    if (table.priceCol !== -1) writeCell(sheet, row, table.priceCol, roundMoney(product.price));
-    if (table.netCol !== -1) writeCell(sheet, row, table.netCol, roundMoney(product.net));
-    if (table.vatCol !== -1) writeCell(sheet, row, table.vatCol, roundMoney(product.vat));
-    if (table.grossCol !== -1) writeCell(sheet, row, table.grossCol, roundMoney(product.gross));
-  });
-}
-
-function writeNearLabel(sheet, range, labels, value) {
-  if (!value) return;
-  const cellAddress = findCellAddressByLabels(sheet, range, labels);
-  if (!cellAddress) return;
-  const cell = XLSX.utils.decode_cell(cellAddress);
-  writeCell(sheet, cell.r + 1, cell.c, value);
-}
-
-function findCellAddressByLabels(sheet, range, labels) {
-  for (let row = range.s.r; row <= range.e.r; row += 1) {
-    for (let col = range.s.c; col <= range.e.c; col += 1) {
-      const address = XLSX.utils.encode_cell({ r: row, c: col });
-      const value = normalizeText(sheet[address]?.v);
-      if (labels.some((label) => value.includes(label))) return address;
-    }
-  }
-  return '';
-}
-
-function findTemplateProductTable(sheet, range) {
-  for (let row = range.s.r; row <= range.e.r; row += 1) {
-    const headers = [];
-    for (let col = range.s.c; col <= range.e.c; col += 1) {
-      headers[col] = normalizeText(sheet[XLSX.utils.encode_cell({ r: row, c: col })]?.v);
-    }
-    const productCol = headers.findIndex((header) => header === 'товар' || header === 'наименование' || header.includes('наименование товара') || header.includes('номенклатура'));
-    const quantityCol = headers.findIndex((header) => header.includes('кол-во') || header.includes('количество'));
-    if (productCol === -1 || quantityCol === -1) continue;
-    return {
-      startRow: row + 1,
-      productCol,
-      quantityCol,
-      priceCol: headers.findIndex((header) => header.includes('цена')),
-      netCol: headers.findIndex((header) => header === 'стоимость' || header.includes('сумма без ндс')),
-      vatCol: headers.findIndex((header) => header.includes('ндс')),
-      grossCol: headers.findIndex((header) => header.includes('с учетом ндс') || header.includes('с учётом ндс') || header.includes('итого')),
-    };
-  }
-  return null;
-}
-
-function collectTemplateProductNames(sheet, table) {
-  const names = [];
-  const range = XLSX.utils.decode_range(sheet['!ref'] || 'A1:A1');
-  for (let row = table.startRow; row <= range.e.r; row += 1) {
-    const value = cleanName(sheet[XLSX.utils.encode_cell({ r: row, c: table.productCol })]?.v);
-    if (value && !isIgnoredProductName(value)) names.push(value);
-  }
-  return names;
-}
-
-function resolveTemplateProductName(sourceName, templateNames) {
-  const source = normalizeText(sourceName);
-  const exact = templateNames.find((name) => normalizeText(name) === source);
-  if (exact) return exact;
-  const partial = templateNames.find((name) => {
-    const target = normalizeText(name);
-    return target.includes(source) || source.includes(target);
-  });
-  if (partial) return partial;
-
-  const sourceTokens = productTokens(source);
-  let bestName = '';
-  let bestScore = 0;
-  templateNames.forEach((name) => {
-    const targetTokens = productTokens(normalizeText(name));
-    const matches = sourceTokens.filter((token) => targetTokens.includes(token)).length;
-    const score = matches / Math.max(sourceTokens.length, targetTokens.length, 1);
-    if (score > bestScore) {
-      bestScore = score;
-      bestName = name;
-    }
-  });
-  return bestScore >= 0.45 ? bestName : sourceName;
-}
-
-function productTokens(value) {
-  return value.split(/[^a-zа-я0-9]+/i).filter((token) => token.length > 2);
-}
-
-function writeCell(sheet, row, col, value) {
-  if (col < 0) return;
-  const address = XLSX.utils.encode_cell({ r: row, c: col });
-  const existing = sheet[address] || {};
-  sheet[address] = { ...existing, v: value, t: typeof value === 'number' ? 'n' : 's' };
-  const range = XLSX.utils.decode_range(sheet['!ref'] || 'A1:A1');
-  if (row > range.e.r) range.e.r = row;
-  if (col > range.e.c) range.e.c = col;
-  sheet['!ref'] = XLSX.utils.encode_range(range);
-}
-
-function appendStoreSheet(workbook, store, sheetName) {
-  const total = totals(store.products);
-  const rows = [
-    [`Nakladnoy № ${els.invoicePrefix.value || 'NK'}`, '', '', '', '', '', ''],
-    ['Sana', formatDate(els.invoiceDate.value || new Date().toISOString().slice(0, 10)), '', 'Magazin', store.name, '', ''],
-    ['Номер заказ', formatOrderNumbers(store), '', 'Asos fayl', state.fileName, '', ''],
-    ['Yetkazib beruvchi', els.supplierName.value || '-', '', '', '', '', ''],
-    [],
-    ['№', 'Товар / Mahsulot nomi', 'Кол-во', 'Цена за единицу', 'Стоимость', 'НДС 12%', 'Стоимость с учётом НДС'],
-    ...store.products.map((item, index) => [index + 1, item.name, roundMoney(item.quantity), roundMoney(item.price), roundMoney(item.net), roundMoney(item.vat), roundMoney(item.gross)]),
-    ['Jami', '', roundMoney(total.quantity), '', roundMoney(total.net), roundMoney(total.vat), roundMoney(total.gross)],
-  ];
-  const worksheet = XLSX.utils.aoa_to_sheet(rows);
-  worksheet['!cols'] = [{ wch: 8 }, { wch: 44 }, { wch: 12 }, { wch: 18 }, { wch: 16 }, { wch: 16 }, { wch: 24 }];
-  XLSX.utils.book_append_sheet(workbook, worksheet, safeSheetName(sheetName));
-}
-
-function buildFlatExportRows() {
-  const lines = [['Magazin', 'Номер заказ', 'Tovar', 'Kol-vo', 'Narx', 'Qiymat', 'NDS 12%', 'NDS bilan']];
-  state.stores.forEach((store) => {
-    store.products.forEach((item) => lines.push([store.name, formatOrderNumbers(store), item.name, item.quantity, item.price, item.net, item.vat, item.gross]));
-  });
-  return lines;
-}
-
-function safeSheetName(name) {
-  return String(name || 'Sheet').replace(/[:\\/?*\[\]]/g, ' ').slice(0, 31) || 'Sheet';
 }
 
 function csvCell(value) {
@@ -810,10 +481,6 @@ function formatMoney(value) {
 
 function formatQuantity(value) {
   return new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 3 }).format(value || 0);
-}
-
-function formatOrderNumbers(store) {
-  return Array.from(new Set(store?.orderNumbers || [])).filter(Boolean).join(', ');
 }
 
 function formatDate(value) {

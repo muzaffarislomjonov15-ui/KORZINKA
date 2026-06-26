@@ -12,7 +12,7 @@
     <div>
       <p class="eyebrow">Excel → tahlil → nakladnoy</p>
       <h1>Korzinka zakazlari uchun nakladnoy generator</h1>
-      <p class="lead">“Заказы с товарами 25-27.05.2026г.xls” ko‘rinishidagi faylni yuklang. Dastur magazin nomlarini va 10 xonali zakaz raqamlarini birlashtiradi, takror mahsulotlarni jamlaydi va 12% NDS bilan “ШАБЛОН СЧФ для КОРЗИНКИ-365” shabloniga nakladnoy tayyorlaydi.</p>
+      <p class="lead">“Заказы с товарами 25-27.05.2026г.xls” ko‘rinishidagi faylni yuklang. Dastur magazin nomlarini birlashtiradi, takror mahsulotlarni jamlaydi va 12% NDS bilan nakladnoy tayyorlaydi.</p>
     </div>
     <button id="printBtn" class="ghost hide-print" type="button">Nakladnoyni chop etish</button>
   </header>
@@ -48,8 +48,8 @@
       <div class="card tips">
         <h3>Parser qanday ishlaydi?</h3>
         <ul>
-          <li>Magazin nomi <b>Магазин → Название</b> ustunidan, 10 xonali zakaz raqami esa <b>Заказ → Номер</b> ustunidan olinadi.</li>
-          <li>Mahsulotlar <b>Товары → Товар</b> sarlavhasidan o‘qiladi va exportda shablondagi mahsulot nomlariga moslab yoziladi.</li>
+          <li>Magazin nomi <b>Название</b> ustuni ostidan olinadi; agar bir xil nom qayta kelsa, bitta magazin sifatida birlashtiriladi.</li>
+          <li>Mahsulotlar <b>Товар</b> sarlavhasidan keyingi qatorlardan o‘qiladi.</li>
           <li><b>Кол-во</b>, <b>Цена за единицу</b>, <b>Стоимость</b>, <b>НДС</b> va <b>Стоимость с учётом НДС</b> qiymatlari topiladi; bo‘sh qiymatlar 12% NDS formulasi bilan to‘ldiriladi.</li>
         </ul>
       </div>
@@ -61,10 +61,7 @@
           <p class="eyebrow">Tahlil</p>
           <h2>Birlashtirilgan zakazlar</h2>
         </div>
-        <div class="button-row hide-print">
-          <button id="exportCsvBtn" class="secondary" type="button">CSV yuklab olish</button>
-          <button id="exportExcelBtn" type="button">Shablonga Excel yuklash</button>
-        </div>
+        <button id="exportCsvBtn" class="secondary hide-print" type="button">CSV yuklab olish</button>
       </div>
       <div id="resultsContent" class="empty-state">Avval Excel fayl yuklang.</div>
     </section>
@@ -97,7 +94,6 @@
             Mahsulotni nomi va narxi bo‘yicha birlashtirish
           </label>
           <button type="button" id="buildInvoiceBtn">Nakladnoyni yangilash</button>
-          <button type="button" id="exportInvoiceExcelBtn" class="secondary">Shablonga Excelga tortish</button>
         </form>
         <div id="invoiceContent" class="invoice-preview empty-state">Avval Excel fayl yuklang.</div>
       </div>
